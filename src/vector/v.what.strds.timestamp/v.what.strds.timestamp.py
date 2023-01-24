@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-
 ############################################################################
 #
 # MODULE:       v.what.strds.timestamp
@@ -43,7 +42,7 @@
 # %end
 
 # %option G_OPT_DB_COLUMN
-# % key: column
+# % key: column_prefix
 # % required: yes
 # % label: Column of input vector map to which raster values are written
 # % description: Column will be added if it does not exists or updated otherwise
@@ -62,9 +61,23 @@
 # % description: Temporal where-clause for selecting a subset of raster maps from STRDS for sampling (Default: The temporal bounding box of the input vector points)
 # %end
 
-# %flag
-# % key: i
-# % label: Interpolate raster values from the four nearest pixels
+# %option
+# % key: method
+# % type: string
+# % description: The methods to use
+# % required: no
+# % multiple: yes
+# % options: number,null_cells,minimum,maximum,range,average,stddev,variance,coeff_var,sum,first_quartile,median,third_quartile,percentile
+# % answer: average
+# %end
+
+# %option
+# % key: percentile
+# % type: integer
+# % description: Percentile to calculate
+# % options: 0-100
+# % answer: 90
+# % required : no
 # %end
 
 """
@@ -93,7 +106,8 @@ import gettext
 gettext.install("grassmods", os.path.join(os.getenv("GISBASE"), "locale"))
 
 
-def sample_relative(input, layer, timestamp_column, column, t_raster, where, i_flag):
+def sample_relative(input, layer, timestamp_column, column_prefix, t_raster,
+                    where, method, percentile):
     """Point sampling in STRDS with relative temporal type
     Not implemented yet.
     """
@@ -106,8 +120,10 @@ def sample_relative(input, layer, timestamp_column, column, t_raster, where, i_f
     )
 
 
-def sample_absolute(input, layer, timestamp_column, column, t_raster, where, i_flag):
-    """Point sampling in STRDS with absolute temporal type"""
+def sample_absolute(input, layer, timestamp_column, column_prefix, t_raster,
+                    where, method, percentile):
+    """Point sampling in STRDS with absolute temporal type
+    """
     start = t_raster["start_time"]
     end = t_raster["end_time"]
     raster_map = "{}@{}".format(t_raster["name"], t_raster["mapset"])
@@ -138,31 +154,29 @@ def sample_absolute(input, layer, timestamp_column, column, t_raster, where, i_f
         )
 
         # Sample spatio-temporally matching points and raster map
-        rast_what = Module(
-            "v.what.rast",
-            map=input,
-            layer=layer,
-            column=column,
-            raster=raster_map,
-            where=where,
-            stderr_=DEVNULL,
-            run_=False,
-            quiet=True,
-        )
-        rast_what.flags.i = i_flag
-        rast_what.run()
+        rast_stats = Module('v.rast.stats', map=input, layer=layer, flags='c',
+                            column_prefix=column_prefix, raster=raster_map,
+                            where=where, run_=False,
+                            method=method, percentile=percentile)
+        # rast_stats = Module('v.what.rast', map=input, layer=layer,
+        #                     column=column_prefix, raster=raster_map,
+        #                     where=where, run_=False,
+        #                     quiet=True)
+
+        rast_stats.run()
 
 
 def main():
     # Get the options
     input = options["input"]
     timestamp_column = options["timestamp_column"]
-    columns = options["column"]
+    columns = options["column_prefix"]
     layer = options["layer"]
     where = options["where"]
     strds = options["strds"]
     tempwhere = options["t_where"]
-    i_flag = flags["i"]
+    method = options["method"]
+    percentile = options["percentile"]
 
     if where == "" or where == " " or where == "\n":
         where = None
@@ -299,15 +313,8 @@ def main():
             # in a ParallelModuleQueue to collect values using multiple
             # cores and then upload results in one operation
 
-            sample(
-                input,
-                layer,
-                timestamp_column,
-                column_names[counter],
-                row,
-                where_clause,
-                i_flag,
-            )
+            sample(input, layer, timestamp_column,
+                   column_names[counter], row, where_clause, method, percentile)
 
             row_number += 1
             grass.percent(row_number, len(rows), 3)
